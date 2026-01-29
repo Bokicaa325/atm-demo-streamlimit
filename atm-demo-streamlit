@@ -1,0 +1,117 @@
+import streamlit as st
+import pandas as pd
+from datetime import date
+
+st.title("🏧 ATM Demo Aplikacija")
+
+# ---- PODACI O KORISNICIMA ----
+users = {
+    "1234": {"name": "Marko", "balance": 2500, "transactions": [], "daily_withdraw": 0, "last_withdraw_date": None},
+    "4321": {"name": "Nesa", "balance": 5000, "transactions": [], "daily_withdraw": 0, "last_withdraw_date": None},
+    "9999": {"name": "Ivan", "balance": 800, "transactions": [], "daily_withdraw": 0, "last_withdraw_date": None},
+}
+
+WITHDRAW_LIMIT = 1000  # CHF po transakciji
+DAILY_LIMIT = 2000     # CHF dnevni limit isplate
+MAX_ATTEMPTS = 3
+
+# ---- SESSION STATE ----
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "attempts" not in st.session_state:
+    st.session_state.attempts = 0
+
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+
+# ---- LOGIN ----
+if not st.session_state.logged_in:
+    st.subheader("Prijava")
+    pin_input = st.text_input("Unesite PIN", type="password")
+
+    if st.button("Prijava"):
+        if pin_input in users:
+            st.session_state.logged_in = True
+            st.session_state.current_user = pin_input
+            st.session_state.attempts = 0
+            st.success(f"Dobrodošao/la, {users[pin_input]['name']} 👋")
+        else:
+            st.session_state.attempts += 1
+            remaining = MAX_ATTEMPTS - st.session_state.attempts
+            st.error(f"Pogrešan PIN! Preostalo pokušaja: {remaining}")
+
+            if st.session_state.attempts >= MAX_ATTEMPTS:
+                st.error("Kartica je blokirana ❌")
+                st.stop()
+
+# ---- ATM MENI ----
+else:
+    user = users[st.session_state.current_user]
+
+    # Reset dnevnog limita ako je novi dan
+    if user["last_withdraw_date"] != date.today():
+        user["daily_withdraw"] = 0
+        user["last_withdraw_date"] = date.today()
+
+    st.subheader("ATM Meni")
+    st.write(f"👤 Korisnik: **{user['name']}**")
+    st.write(f"💰 Stanje: **{user['balance']:,} CHF**")
+    st.write(f"⬆ Maksimalna isplata po transakciji: **{WITHDRAW_LIMIT} CHF**")
+    st.write(f"⬆ Maksimalna dnevna isplata: **{DAILY_LIMIT - user['daily_withdraw']} CHF**")
+
+    amount = st.number_input("Unesite iznos (CHF)", min_value=0)
+
+    col1, col2, col3 = st.columns(3)
+
+    # UPLATA
+    with col1:
+        if st.button("Uplata"):
+            user["balance"] += amount
+            user["transactions"].append(f"Uplata: +{amount} CHF")
+            st.success(f"Uplaćeno {amount} CHF")
+            st.experimental_rerun()
+
+    # ISPLATA
+    with col2:
+        if st.button("Isplata"):
+            if amount > WITHDRAW_LIMIT:
+                st.error("Prekoračen maksimalni limit po transakciji")
+            elif amount > user["balance"]:
+                st.error("Nedovoljno sredstava")
+            elif user["daily_withdraw"] + amount > DAILY_LIMIT:
+                st.error("Prekoračen dnevni limit isplate")
+            else:
+                user["balance"] -= amount
+                user["daily_withdraw"] += amount
+                user["transactions"].append(f"Isplata: -{amount} CHF")
+                st.success(f"Podignuto {amount} CHF")
+                st.experimental_rerun()
+
+    # ISTORIJA TRANSAKCIJA
+    st.subheader("📜 Istorija transakcija")
+    if user["transactions"]:
+        for t in reversed(user["transactions"]):
+            st.write(t)
+    else:
+        st.write("Još nema transakcija.")
+
+    # EXPORT TRANSAKCIJA U CSV
+    with col3:
+        if st.button("Eksport CSV"):
+            if user["transactions"]:
+                df = pd.DataFrame({"Transakcije": user["transactions"]})
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Preuzmi CSV",
+                    data=csv,
+                    file_name=f"{user['name']}_transactions.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("Nema transakcija za eksportovanje.")
+
+    # ODJAVA
+    if st.button("Odjava"):
+        st.session_state.logged_in = False
+        st.session_state.current_user = None
